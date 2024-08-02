@@ -100,7 +100,7 @@ impl Server {
         query_port: u16,
         server_mode: ServerMode,
         version: &str,
-    ) -> SIResult<(Server, SingleClient<ServerManager>)> {
+    ) -> SIResult<(Server, Client<ServerManager>)> {
         unsafe {
             let version = CString::new(version).unwrap();
 
@@ -148,10 +148,7 @@ impl Server {
                     inner: server.clone(),
                     server: server_raw,
                 },
-                SingleClient {
-                    inner: server,
-                    _not_sync: PhantomData,
-                },
+                Client { inner: server },
             ))
         }
     }
@@ -311,6 +308,14 @@ impl Server {
         }
     }
 
+    /// Login to a generic account by token
+    pub fn log_on(&self, token: &str) {
+        let token = CString::new(token).unwrap();
+        unsafe {
+            sys::SteamAPI_ISteamGameServer_LogOn(self.server, token.as_ptr());
+        }
+    }
+
     /// If active, updates the master server with this server's presence so players can find it via
     /// the steam matchmaking/server browser interfaces.
     pub fn enable_heartbeats(&self, active: bool) {
@@ -340,7 +345,7 @@ impl Server {
     pub fn set_server_name(&self, server_name: &str) {
         let server_name = CString::new(server_name).unwrap();
         unsafe {
-            sys::SteamAPI_ISteamGameServer_SetMapName(self.server, server_name.as_ptr());
+            sys::SteamAPI_ISteamGameServer_SetServerName(self.server, server_name.as_ptr());
         }
     }
 
@@ -353,12 +358,49 @@ impl Server {
         }
     }
 
+    /// Sets a string defining the "gametags" for this server, this is optional, but if set it
+    /// allows users to filter in the matchmaking/server-browser interfaces based on the value.
+    ///
+    /// This is usually formatted as a comma or semicolon separated list.
+    ///
+    /// Don't set this unless it actually changes, its only uploaded to the master once;
+    /// when acknowledged.
+    ///
+    /// The new "gametags" value to set. Must not be an empty string ("").
+    /// This can not be longer than 127.
+    pub fn set_game_tags(&self, tags: &str) {
+        assert!(tags.len() != 0, "tags must not be an empty string (\"\").");
+        assert!(tags.len() < 128, "tags can not be longer than 127.");
+
+        let tags = CString::new(tags).unwrap();
+        unsafe {
+            sys::SteamAPI_ISteamGameServer_SetGameTags(self.server, tags.as_ptr());
+        }
+    }
+
+    /// Add/update a rules key/value pair.
+    pub fn set_key_value(&self, key: &str, value: &str) {
+        let key = CString::new(key).unwrap();
+        let value = CString::new(value).unwrap();
+
+        unsafe {
+            sys::SteamAPI_ISteamGameServer_SetKeyValue(self.server, key.as_ptr(), value.as_ptr());
+        }
+    }
+
+    /// Clears the whole list of key/values that are sent in rules queries.
+    pub fn clear_all_key_values(&self) {
+        unsafe {
+            sys::SteamAPI_ISteamGameServer_ClearAllKeyValues(self.server);
+        }
+    }
+
     /// Returns an accessor to the steam UGC interface (steam workshop)
     ///
     /// **For this to work properly, you need to call `UGC::init_for_game_server()`!**
     pub fn ugc(&self) -> UGC<ServerManager> {
         unsafe {
-            let ugc = sys::SteamAPI_SteamGameServerUGC_v018();
+            let ugc = sys::SteamAPI_SteamGameServerUGC_v020();
             debug_assert!(!ugc.is_null());
             UGC {
                 ugc,

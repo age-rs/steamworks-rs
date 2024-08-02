@@ -16,7 +16,6 @@ use core::ffi::c_void;
 use std::collections::HashMap;
 use std::ffi::{c_char, CStr, CString};
 use std::fmt::{self, Debug, Formatter};
-use std::marker::PhantomData;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, Weak};
 
@@ -29,6 +28,7 @@ pub use crate::error::*;
 pub use crate::friends::*;
 pub use crate::input::*;
 pub use crate::matchmaking::*;
+pub use crate::matchmaking_servers::*;
 pub use crate::networking::*;
 pub use crate::remote_play::*;
 pub use crate::remote_storage::*;
@@ -44,6 +44,7 @@ mod error;
 mod friends;
 mod input;
 mod matchmaking;
+mod matchmaking_servers;
 mod networking;
 pub mod networking_messages;
 pub mod networking_sockets;
@@ -85,13 +86,6 @@ impl<Manager> Clone for Client<Manager> {
     }
 }
 
-/// Allows access parts of the steam api that can only be called
-/// on a single thread at any given time.
-pub struct SingleClient<Manager = ClientManager> {
-    inner: Arc<Inner<Manager>>,
-    _not_sync: PhantomData<*mut ()>,
-}
-
 struct Inner<Manager> {
     _manager: Manager,
     callbacks: Mutex<Callbacks>,
@@ -120,7 +114,6 @@ unsafe impl<Manager: Send + Sync> Send for Inner<Manager> {}
 unsafe impl<Manager: Send + Sync> Sync for Inner<Manager> {}
 unsafe impl<Manager: Send + Sync> Send for Client<Manager> {}
 unsafe impl<Manager: Send + Sync> Sync for Client<Manager> {}
-unsafe impl<Manager: Send + Sync> Send for SingleClient<Manager> {}
 
 /// Returns true if the app wasn't launched through steam and
 /// begins relaunching it, the app should exit as soon as possible.
@@ -139,45 +132,16 @@ where
 }
 
 impl Client<ClientManager> {
-    fn steam_api_init_ex(p_out_err_msg: *mut SteamErrMsg) -> ESteamAPIInitResult {
-        let versions: Vec<&[u8]> = vec![
-            sys::STEAMUTILS_INTERFACE_VERSION,
-            sys::STEAMNETWORKINGUTILS_INTERFACE_VERSION,
-            sys::STEAMAPPS_INTERFACE_VERSION,
-            sys::STEAMCONTROLLER_INTERFACE_VERSION,
-            sys::STEAMFRIENDS_INTERFACE_VERSION,
-            sys::STEAMGAMESEARCH_INTERFACE_VERSION,
-            sys::STEAMHTMLSURFACE_INTERFACE_VERSION,
-            sys::STEAMHTTP_INTERFACE_VERSION,
-            sys::STEAMINPUT_INTERFACE_VERSION,
-            sys::STEAMINVENTORY_INTERFACE_VERSION,
-            sys::STEAMMATCHMAKINGSERVERS_INTERFACE_VERSION,
-            sys::STEAMMATCHMAKING_INTERFACE_VERSION,
-            sys::STEAMMUSICREMOTE_INTERFACE_VERSION,
-            sys::STEAMMUSIC_INTERFACE_VERSION,
-            sys::STEAMNETWORKINGMESSAGES_INTERFACE_VERSION,
-            sys::STEAMNETWORKINGSOCKETS_INTERFACE_VERSION,
-            sys::STEAMNETWORKING_INTERFACE_VERSION,
-            sys::STEAMPARENTALSETTINGS_INTERFACE_VERSION,
-            sys::STEAMPARTIES_INTERFACE_VERSION,
-            sys::STEAMREMOTEPLAY_INTERFACE_VERSION,
-            sys::STEAMREMOTESTORAGE_INTERFACE_VERSION,
-            sys::STEAMSCREENSHOTS_INTERFACE_VERSION,
-            sys::STEAMUGC_INTERFACE_VERSION,
-            sys::STEAMUSERSTATS_INTERFACE_VERSION,
-            sys::STEAMUSER_INTERFACE_VERSION,
-            sys::STEAMVIDEO_INTERFACE_VERSION,
-            b"\0",
-        ];
-
-        let merged_versions: Vec<u8> = versions.into_iter().flatten().cloned().collect();
-        let merged_versions_ptr = merged_versions.as_ptr() as *const ::std::os::raw::c_char;
-
-        unsafe { sys::SteamInternal_SteamAPI_Init(merged_versions_ptr, p_out_err_msg) }
+    /// Call to the native SteamAPI_Init function.
+    /// should not be used directly, but through either
+    /// init_flat() or init_flat_app()
+    unsafe fn steam_api_init_flat(p_out_err_msg: *mut SteamErrMsg) -> ESteamAPIInitResult {
+        unsafe { sys::SteamAPI_InitFlat(p_out_err_msg) }
     }
 
-    /// Attempts to initialize the steamworks api and returns
-    /// a client to access the rest of the api.
+    /// Attempts to initialize the steamworks api without full API integration
+    /// through SteamAPI_InitFlat added in SDK 1.59
+    /// and returns a client to access the rest of the api.
     ///
     /// This should only ever have one instance per a program.
     ///
@@ -194,13 +158,12 @@ impl Client<ClientManager> {
     /// * The game isn't running on the same user/level as the steam client
     /// * The user doesn't own a license for the game.
     /// * The app ID isn't completely set up.
-    pub fn init() -> SIResult<(Client<ClientManager>, SingleClient<ClientManager>)> {
+    pub fn init() -> SIResult<Client<ClientManager>> {
         static_assert_send::<Client<ClientManager>>();
         static_assert_sync::<Client<ClientManager>>();
-        static_assert_send::<SingleClient<ClientManager>>();
         unsafe {
             let mut err_msg: sys::SteamErrMsg = [0; 1024];
-            let result = Self::steam_api_init_ex(&mut err_msg);
+            let result = Self::steam_api_init_flat(&mut err_msg);
 
             if result != sys::ESteamAPIInitResult::k_ESteamAPIInitResult_OK {
                 return Err(SteamAPIInitError::from_result_and_message(result, err_msg));
@@ -219,19 +182,12 @@ impl Client<ClientManager> {
                     connection_callback: Default::default(),
                 }),
             });
-            Ok((
-                Client {
-                    inner: client.clone(),
-                },
-                SingleClient {
-                    inner: client,
-                    _not_sync: PhantomData,
-                },
-            ))
+            Ok(Client { inner: client })
         }
     }
 
-    /// Attempts to initialize the steamworks api **for a specified app ID**
+    /// Attempts to initialize the steamworks api with the APP_ID
+    /// without full API integration through SteamAPI_InitFlat
     /// and returns a client to access the rest of the api.
     ///
     /// This should only ever have one instance per a program.
@@ -243,18 +199,17 @@ impl Client<ClientManager> {
     /// * The game isn't running on the same user/level as the steam client
     /// * The user doesn't own a license for the game.
     /// * The app ID isn't completely set up.
-    pub fn init_app<ID: Into<AppId>>(
-        app_id: ID,
-    ) -> SIResult<(Client<ClientManager>, SingleClient<ClientManager>)> {
+    pub fn init_app<ID: Into<AppId>>(app_id: ID) -> SIResult<Client<ClientManager>> {
         let app_id = app_id.into().0.to_string();
         std::env::set_var("SteamAppId", &app_id);
         std::env::set_var("SteamGameId", app_id);
         Client::init()
     }
 }
-impl<M> SingleClient<M>
+
+impl<Manager> Client<Manager>
 where
-    M: Manager,
+    Manager: crate::Manager,
 {
     /// Runs any currently pending callbacks
     ///
@@ -265,7 +220,7 @@ where
     /// in order to reduce the latency between recieving events.
     pub fn run_callbacks(&self) {
         unsafe {
-            let pipe = M::get_pipe();
+            let pipe = Manager::get_pipe();
             sys::SteamAPI_ManualDispatch_RunFrame(pipe);
             let mut callback = std::mem::zeroed();
             while sys::SteamAPI_ManualDispatch_GetNextCallback(pipe, &mut callback) {
@@ -298,9 +253,7 @@ where
             }
         }
     }
-}
 
-impl<Manager> Client<Manager> {
     /// Registers the passed function as a callback for the
     /// given type.
     ///
@@ -334,6 +287,18 @@ impl<Manager> Client<Manager> {
             Matchmaking {
                 mm: mm,
                 inner: self.inner.clone(),
+            }
+        }
+    }
+
+    /// Returns an accessor to the steam matchmaking_servers interface
+    pub fn matchmaking_servers(&self) -> MatchmakingServers<Manager> {
+        unsafe {
+            let mm = sys::SteamAPI_SteamMatchmakingServers_v002();
+            debug_assert!(!mm.is_null());
+            MatchmakingServers {
+                mms: mm,
+                _inner: self.inner.clone(),
             }
         }
     }
@@ -452,7 +417,7 @@ impl<Manager> Client<Manager> {
     /// Returns an accessor to the steam UGC interface (steam workshop)
     pub fn ugc(&self) -> UGC<Manager> {
         unsafe {
-            let ugc = sys::SteamAPI_SteamUGC_v018();
+            let ugc = sys::SteamAPI_SteamUGC_v020();
             debug_assert!(!ugc.is_null());
             UGC {
                 ugc,
@@ -622,7 +587,7 @@ mod tests {
     #[test]
     #[serial]
     fn basic_test() {
-        let (client, single) = Client::init().unwrap();
+        let client = Client::init().unwrap();
 
         let _cb = client.register_callback(|p: PersonaStateChange| {
             println!("Got callback: {:?}", p);
@@ -654,7 +619,7 @@ mod tests {
         friends.request_user_information(SteamId(76561198174976054), true);
 
         for _ in 0..50 {
-            single.run_callbacks();
+            client.run_callbacks();
             ::std::thread::sleep(::std::time::Duration::from_millis(100));
         }
     }
