@@ -382,7 +382,11 @@ impl UserStats {
         let name = CString::new(name).map_err(|_| ())?;
         let mut value: i64 = 0;
         let success = unsafe {
-            sys::SteamAPI_ISteamUserStats_GetGlobalStatInt64(self.user_stats, name.as_ptr(), &mut value)
+            sys::SteamAPI_ISteamUserStats_GetGlobalStatInt64(
+                self.user_stats,
+                name.as_ptr(),
+                &mut value,
+            )
         };
         if success {
             Ok(value)
@@ -410,7 +414,11 @@ impl UserStats {
         let name = CString::new(name).map_err(|_| ())?;
         let mut value: f64 = 0.0;
         let success = unsafe {
-            sys::SteamAPI_ISteamUserStats_GetGlobalStatDouble(self.user_stats, name.as_ptr(), &mut value)
+            sys::SteamAPI_ISteamUserStats_GetGlobalStatDouble(
+                self.user_stats,
+                name.as_ptr(),
+                &mut value,
+            )
         };
         if success {
             Ok(value)
@@ -783,8 +791,8 @@ fn test_global_stats() {
     let stats = client.user_stats();
 
     // Get stat name from environment variable, default to "test_stat"
-    let stat_name = std::env::var("TEST_GLOBAL_STAT_NAME")
-        .unwrap_or_else(|_| "test_stat".to_string());
+    let stat_name =
+        std::env::var("TEST_GLOBAL_STAT_NAME").unwrap_or_else(|_| "test_stat".to_string());
     println!("Using global stat name: {}", stat_name);
 
     // Test request_global_stats with 7 days of history
@@ -798,23 +806,33 @@ fn test_global_stats() {
                 // Test get_global_stat_i64
                 match c2.user_stats().get_global_stat_i64(&stat_name_clone) {
                     Ok(value) => println!("Global stat (i64): {}", value),
-                    Err(_) => println!("Failed to get global stat (i64) - stat may not exist or not be aggregated"),
+                    Err(_) => println!(
+                        "Failed to get global stat (i64) - stat may not exist or not be aggregated"
+                    ),
                 }
 
                 // Test get_global_stat_f64
                 match c2.user_stats().get_global_stat_f64(&stat_name_clone) {
                     Ok(value) => println!("Global stat (f64): {}", value),
-                    Err(_) => println!("Failed to get global stat (f64) - stat may not exist or not be aggregated"),
+                    Err(_) => println!(
+                        "Failed to get global stat (f64) - stat may not exist or not be aggregated"
+                    ),
                 }
 
                 // Test get_global_stat_history_i64
-                match c2.user_stats().get_global_stat_history_i64(&stat_name_clone, 7) {
+                match c2
+                    .user_stats()
+                    .get_global_stat_history_i64(&stat_name_clone, 7)
+                {
                     Ok(history) => println!("Global stat history (i64): {:?}", history),
                     Err(_) => println!("Failed to get global stat history (i64)"),
                 }
 
                 // Test get_global_stat_history_f64
-                match c2.user_stats().get_global_stat_history_f64(&stat_name_clone, 7) {
+                match c2
+                    .user_stats()
+                    .get_global_stat_history_f64(&stat_name_clone, 7)
+                {
                     Ok(history) => println!("Global stat history (f64): {:?}", history),
                     Err(_) => println!("Failed to get global stat history (f64)"),
                 }
