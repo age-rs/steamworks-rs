@@ -392,7 +392,7 @@ impl Client {
     /// Returns an accessor to the steam apps interface
     pub fn apps(&self) -> Apps {
         unsafe {
-            let apps = sys::SteamAPI_SteamApps_v008();
+            let apps = sys::SteamAPI_SteamApps_v009();
             debug_assert!(!apps.is_null());
             Apps {
                 apps: apps,
@@ -452,7 +452,7 @@ impl Client {
     /// Returns an accessor to the steam remote play interface
     pub fn remote_play(&self) -> RemotePlay {
         unsafe {
-            let rp = sys::SteamAPI_SteamRemotePlay_v003();
+            let rp = sys::SteamAPI_SteamRemotePlay_v004();
             debug_assert!(!rp.is_null());
             RemotePlay {
                 rp,
