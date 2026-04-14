@@ -99,9 +99,9 @@ pub struct P2PSessionState {
     /// Number of packets queued for sending
     pub packets_queued_for_send: i32,
     /// Potential IP address of remote host (could be Steam relay server)
-    pub remote_ip: u32,
+    pub remote_ip: Option<std::net::Ipv4Addr>,
     /// Remote port number
-    pub remote_port: u16,
+    pub remote_port: Option<u16>,
 }
 
 impl Networking {
@@ -128,12 +128,12 @@ impl Networking {
                 Some(P2PSessionState {
                     connection_active: state.m_bConnectionActive != 0,
                     connecting: state.m_bConnecting != 0,
-                    error: P2PSessionError::from(state.m_eP2PSessionError),
+                    error: state.m_eP2PSessionError.into(),
                     using_relay: state.m_bUsingRelay != 0,
                     bytes_queued_for_send: state.m_nBytesQueuedForSend,
                     packets_queued_for_send: state.m_nPacketsQueuedForSend,
-                    remote_ip: state.m_nRemoteIP,
-                    remote_port: state.m_nRemotePort,
+                    remote_ip: (state.m_nRemoteIP != 0).then_some(state.m_nRemoteIP.into()),
+                    remote_port: (state.m_nRemotePort != 0).then_some(state.m_nRemotePort),
                 })
             } else {
                 None
