@@ -67,7 +67,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if triple.contains("darwin") {
             "macos"
         } else if triple.contains("linux") {
-            "linux"
+            if triple.contains("aarch64") {
+                "linuxarm"
+            } else {
+                "linux"
+            }
         } else {
             panic!("Unsupported OS");
         };
